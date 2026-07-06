@@ -114,7 +114,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <span class="glabel">File</span>
       <button id="m-new" title="New / clear">New</button>
       <button id="m-open" title="Open .json project">Open</button>
-      <button id="m-save" title="Save project to file">Save</button>
+      <button id="m-save" title="Save (⌘S) — saves back to the opened file; first save asks for name & location">Save</button>
+      <button id="m-saveas" title="Save a copy under a new name / location">Save As…</button>
       <button id="m-ref" title="Load the reference layout">Reference</button>
       <select id="m-template" title="Load a built-in template"><option value="">Templates…</option></select>
       <span id="filename" title="Working file — click to rename">Untitled</span>
@@ -1620,14 +1621,47 @@ function applyDoc(doc) {
   history.applying = false;
   renderPageFrame(); selectCell(null); fitContent(); scheduleRefresh();
 }
-function saveFile() {
-  if (currentFile === 'Untitled') {
-    const n = prompt('Save as (file name):', PROJECT.drawing || 'PFD-001');
+/* File System Access API (Chrome/Edge): real Save dialogs + in-place re-save.
+   Safari/Firefox lack the pickers -> fall back to browser downloads. */
+const FS_OK = typeof window.showSaveFilePicker === 'function';
+let fileHandle = null;      // handle of the opened / last-saved file
+function docText() { return JSON.stringify(serialize(), null, 2); }
+async function writeToHandle(h) {
+  const w = await h.createWritable();
+  await w.write(docText());
+  await w.close();
+}
+function saveViaDownload(askName) {
+  if (askName || currentFile === 'Untitled') {
+    const n = prompt('Save as (file name):', currentFile === 'Untitled' ? (PROJECT.drawing || 'PFD-001') : currentFile);
     if (n == null) return;
     setFileName(n);
   }
-  download(currentFile + '.json', JSON.stringify(serialize(), null, 2), 'application/json');
+  download(currentFile + '.json', docText(), 'application/json');
   markSaved('Saved to file');
+}
+async function saveAs() {
+  if (!FS_OK) { saveViaDownload(true); return; }
+  try {
+    const h = await window.showSaveFilePicker({
+      suggestedName: (currentFile === 'Untitled' ? (PROJECT.drawing || 'PFD-001') : currentFile) + '.json',
+      types: [{ description: 'PFD project (JSON)', accept: { 'application/json': ['.json'] } }]
+    });
+    await writeToHandle(h);
+    fileHandle = h;
+    setFileName(h.name);
+    markSaved('Saved to file');
+  } catch (e) {
+    if (e && e.name !== 'AbortError') alert('Save failed: ' + e.message);
+  }
+}
+async function saveFile() {
+  if (FS_OK && fileHandle) {
+    try { await writeToHandle(fileHandle); markSaved('Saved'); return; }
+    catch (e) { /* permission revoked / file moved -> ask again */ }
+  }
+  if (FS_OK) return saveAs();
+  saveViaDownload(false);
 }
 function autosave() {
   try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(serialize())); markSaved('Autosaved'); } catch (e) {}
@@ -1640,9 +1674,24 @@ function markSaved(msg) {
 document.getElementById('fileinput').addEventListener('change', function () {
   const f = this.files[0]; if (!f) return;
   const r = new FileReader();
-  r.onload = () => { try { applyDoc(JSON.parse(r.result)); setFileName(f.name); resetHistory(); autosave(); } catch (e) { alert('Could not read project file: ' + e.message); } };
+  r.onload = () => { try { applyDoc(JSON.parse(r.result)); fileHandle = null; setFileName(f.name); resetHistory(); autosave(); } catch (e) { alert('Could not read project file: ' + e.message); } };
   r.readAsText(f); this.value = '';
 });
+async function openFile() {
+  if (typeof window.showOpenFilePicker !== 'function') { document.getElementById('fileinput').click(); return; }
+  try {
+    const [h] = await window.showOpenFilePicker({
+      types: [{ description: 'PFD project (JSON)', accept: { 'application/json': ['.json'] } }],
+      multiple: false
+    });
+    const f = await h.getFile();
+    applyDoc(JSON.parse(await f.text()));
+    fileHandle = h;                       // Save now writes back to this file
+    setFileName(f.name); resetHistory(); autosave();
+  } catch (e) {
+    if (e && e.name !== 'AbortError') alert('Could not read project file: ' + e.message);
+  }
+}
 
 /* ============================================================
    Undo / redo (snapshot history)
@@ -1702,13 +1751,15 @@ function deleteSel() { if (selected) { selected.remove(); selectCell(null); } }
 /* ============================================================
    Menu wiring
    ============================================================ */
-document.getElementById('m-new').onclick = () => { if (confirm('Start a new blank drawing? Current work will be cleared (autosave keeps a copy).')) { graph.clear(); setFileName('Untitled'); resetHistory(); renderPageFrame(); scheduleRefresh(); } };
-document.getElementById('m-open').onclick = () => document.getElementById('fileinput').click();
+document.getElementById('m-new').onclick = () => { if (confirm('Start a new blank drawing? Current work will be cleared (autosave keeps a copy).')) { graph.clear(); fileHandle = null; setFileName('Untitled'); resetHistory(); renderPageFrame(); scheduleRefresh(); } };
+document.getElementById('m-open').onclick = openFile;
 document.getElementById('m-save').onclick = saveFile;
-document.getElementById('m-ref').onclick = () => { if (confirm('Load the reference layout? This replaces the current drawing.')) { graph.clear(); buildLayout(); setFileName('Untitled'); resetHistory(); renderPageFrame(); selectCell(null); fitContent(); scheduleRefresh(); } };
+document.getElementById('m-saveas').onclick = saveAs;
+document.getElementById('m-ref').onclick = () => { if (confirm('Load the reference layout? This replaces the current drawing.')) { graph.clear(); buildLayout(); fileHandle = null; setFileName('Untitled'); resetHistory(); renderPageFrame(); selectCell(null); fitContent(); scheduleRefresh(); } };
 document.getElementById('filename').onclick = () => {
   const n = prompt('File name (used when saving):', currentFile === 'Untitled' ? (PROJECT.drawing || '') : currentFile);
   if (n == null) return;
+  if (n.replace(/\.json$/i, '').trim() !== currentFile) fileHandle = null; // renamed -> next Save asks where
   setFileName(n); markSaved('Renamed');
 };
 (function initTemplates() {
@@ -1724,7 +1775,7 @@ document.getElementById('filename').onclick = () => {
     if (!name || !tpls[name]) return;
     if (!confirm('Load template "' + name + '"? This replaces the current drawing.')) return;
     applyDoc(JSON.parse(JSON.stringify(tpls[name])));
-    setFileName(name); resetHistory(); autosave();
+    fileHandle = null; setFileName(name); resetHistory(); autosave();
   };
 })();
 document.getElementById('m-undo').onclick = undo;
