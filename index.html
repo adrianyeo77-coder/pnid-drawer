@@ -54,6 +54,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
   #paper .joint-element:hover .joint-port { opacity: 1; }
   #paper .joint-element.pnid-sel .joint-port { opacity: 1; }
   #paper .available-magnet { opacity: 1 !important; }
+  #paper .joint-port { cursor: crosshair; }
+  #paper .joint-port:hover [joint-selector="circle"] { fill: #ddf4ff; stroke: #0969da; }
+  #paper .joint-port text { pointer-events: none; } /* labels must never eat the dot's mousedown */
   #zoombar { position: absolute; top: 8px; right: 8px; display: inline-flex; gap: 4px; align-items: center; z-index: 5; background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 3px 4px; font-size: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
   #zoombar button { font-size: 12px; padding: 3px 7px; background: #fff; border: 1px solid #d0d7de; border-radius: 5px; cursor: pointer; }
   #zoombar button:hover { border-color: #0969da; }
@@ -423,7 +426,7 @@ const paper = new dia.Paper({
   snapLinks: { radius: 12 },
   validateConnection: (cv, m, tv) => cv !== tv,
   markAvailable: true,
-  defaultConnectionPoint: { name: 'boundary' },
+  defaultConnectionPoint: { name: 'boundary', args: { selector: 'circle' } }, /* anchor on the visible dot, not the invisible grab circle */
   defaultRouter: { name: 'manhattan', args: { step: 10, padding: 16, isPointObstacle: () => false } },
   defaultConnector: { name: 'jumpover', args: { size: 6, type: 'arc' } }
 });
@@ -440,17 +443,25 @@ const paper = new dia.Paper({
 })();
 
 /* port helpers */
-const portAttrs = (fill) => ({ circle: { r: 4, magnet: true, stroke: '#1a1a1a', strokeWidth: 1, fill: fill || '#ffffff' } });
+/* every port = small visible dot + big invisible grab circle (easier to start pipes) */
+const portAttrs = (fill) => ({
+  circle: { r: 4, magnet: true, stroke: '#1a1a1a', strokeWidth: 1, fill: fill || '#ffffff' },
+  hit: { r: 10, magnet: true, fill: 'transparent', stroke: 'none' }
+});
+const PORT_MARKUP = [{ tagName: 'circle', selector: 'circle' }, { tagName: 'circle', selector: 'hit' }];
 function absPorts(items) {
   return {
     groups: { std: { position: 'absolute', attrs: portAttrs() } },
     items: items.map(i => {
-      const circle = { ...portAttrs(i.fill).circle };
+      const a = portAttrs(i.fill);
+      const circle = { ...a.circle };
       if (i.r) circle.r = i.r;
+      const hit = { ...a.hit };
+      hit.r = i.hitR || (i.r ? i.r + 6 : 10);
       return ({
       id: i.id, group: 'std', args: { x: i.x, y: i.y },
-      attrs: i.label ? { circle, portLabel: { text: i.label, fontSize: 8, fill: '#57606a' } } : { circle },
-      markup: i.label ? [{ tagName: 'circle', selector: 'circle' }, { tagName: 'text', selector: 'portLabel' }] : [{ tagName: 'circle', selector: 'circle' }],
+      attrs: i.label ? { circle, hit, portLabel: { text: i.label, fontSize: 8, fill: '#57606a' } } : { circle, hit },
+      markup: i.label ? PORT_MARKUP.concat([{ tagName: 'text', selector: 'portLabel' }]) : PORT_MARKUP,
       label: i.label ? { position: { name: i.labelPos || 'top', args: { y: -7 } } } : undefined
     }); })
   };
@@ -487,8 +498,8 @@ function makePump() {
   return new Pump({
     ports: {
       groups: {
-        in: { position: 'left', attrs: portAttrs('#54aeff'), label: { position: { name: 'left', args: { x: -5 } }, markup: [{ tagName: 'text', selector: 'portLabel' }] } },
-        out: { position: 'right', attrs: portAttrs('#3fb950'), label: { position: { name: 'right', args: { x: 5 } }, markup: [{ tagName: 'text', selector: 'portLabel' }] } }
+        in: { position: 'left', attrs: portAttrs('#54aeff'), markup: PORT_MARKUP, label: { position: { name: 'left', args: { x: -5 } }, markup: [{ tagName: 'text', selector: 'portLabel' }] } },
+        out: { position: 'right', attrs: portAttrs('#3fb950'), markup: PORT_MARKUP, label: { position: { name: 'right', args: { x: 5 } }, markup: [{ tagName: 'text', selector: 'portLabel' }] } }
       },
       items: [
         { id: 'in', group: 'in', attrs: { portLabel: { text: 'In', fontSize: 8, fill: '#57606a' } } },
@@ -740,8 +751,8 @@ const Junction = dia.Element.define('pnid.Junction', {
 }, { markup: [{ tagName: 'g', selector: 'sg', children: [{ tagName: 'circle', selector: 'body' }] }, { tagName: 'text', selector: 'label' }] });
 function makeJunction() {
   return new Junction({ ports: absPorts([
-    { id: 't', x: '50%', y: 0, r: 3 }, { id: 'b', x: '50%', y: '100%', r: 3 },
-    { id: 'l', x: 0, y: '50%', r: 3 }, { id: 'r', x: '100%', y: '50%', r: 3 }
+    { id: 't', x: '50%', y: 0, r: 3, hitR: 5 }, { id: 'b', x: '50%', y: '100%', r: 3, hitR: 5 },
+    { id: 'l', x: 0, y: '50%', r: 3, hitR: 5 }, { id: 'r', x: '100%', y: '50%', r: 3, hitR: 5 }
   ]) });
 }
 
