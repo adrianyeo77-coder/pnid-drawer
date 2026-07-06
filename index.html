@@ -30,6 +30,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
   #menubar select { font-size: 12px; padding: 3px 5px; background: #333b44; color: #fff; border: 1px solid #454d57; border-radius: 5px; }
   #menubar label.chk { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
   #savestate { font-size: 11px; color: #8b949e; min-width: 92px; }
+  #filename { font-size: 11px; color: #e6edf3; background: #2d333b; border: 1px solid #444c56;
+    border-radius: 4px; padding: 2px 8px; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; cursor: pointer; }
+  #filename:hover { border-color: #58a6ff; }
 
   #main { display: flex; flex: 1 1 auto; min-height: 0; }
 
@@ -113,6 +117,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <button id="m-save" title="Save project to file">Save</button>
       <button id="m-ref" title="Load the reference layout">Reference</button>
       <select id="m-template" title="Load a built-in template"><option value="">Templates…</option></select>
+      <span id="filename" title="Working file — click to rename">Untitled</span>
       <span id="savestate">—</span>
     </div>
     <div class="group">
@@ -1528,6 +1533,18 @@ function exportPrint() {
    Save / load / autosave
    ============================================================ */
 const AUTOSAVE_KEY = 'pnid-autosave-v1';
+const FILENAME_KEY = 'pnid-filename-v1';
+let currentFile = 'Untitled';
+function setFileName(name) {
+  currentFile = String(name || 'Untitled').replace(/\.json$/i, '').trim() || 'Untitled';
+  const el = document.getElementById('filename');
+  if (el) {
+    el.textContent = currentFile === 'Untitled' ? 'Untitled' : currentFile + '.json';
+    el.title = 'Working file: ' + currentFile + '.json — click to rename';
+  }
+  document.title = currentFile + ' — PFD Drawer';
+  try { localStorage.setItem(FILENAME_KEY, currentFile); } catch (e) {}
+}
 /* Lean format: store type + geometry-independent data only, so the visual geometry is
    regenerated from the current shape definitions on load (symbol edits propagate to old files). */
 function serialize() {
@@ -1604,7 +1621,12 @@ function applyDoc(doc) {
   renderPageFrame(); selectCell(null); fitContent(); scheduleRefresh();
 }
 function saveFile() {
-  download((PROJECT.drawing || 'project') + '.json', JSON.stringify(serialize(), null, 2), 'application/json');
+  if (currentFile === 'Untitled') {
+    const n = prompt('Save as (file name):', PROJECT.drawing || 'PFD-001');
+    if (n == null) return;
+    setFileName(n);
+  }
+  download(currentFile + '.json', JSON.stringify(serialize(), null, 2), 'application/json');
   markSaved('Saved to file');
 }
 function autosave() {
@@ -1618,7 +1640,7 @@ function markSaved(msg) {
 document.getElementById('fileinput').addEventListener('change', function () {
   const f = this.files[0]; if (!f) return;
   const r = new FileReader();
-  r.onload = () => { try { applyDoc(JSON.parse(r.result)); resetHistory(); autosave(); } catch (e) { alert('Could not read project file: ' + e.message); } };
+  r.onload = () => { try { applyDoc(JSON.parse(r.result)); setFileName(f.name); resetHistory(); autosave(); } catch (e) { alert('Could not read project file: ' + e.message); } };
   r.readAsText(f); this.value = '';
 });
 
@@ -1680,10 +1702,15 @@ function deleteSel() { if (selected) { selected.remove(); selectCell(null); } }
 /* ============================================================
    Menu wiring
    ============================================================ */
-document.getElementById('m-new').onclick = () => { if (confirm('Start a new blank drawing? Current work will be cleared (autosave keeps a copy).')) { graph.clear(); resetHistory(); renderPageFrame(); scheduleRefresh(); } };
+document.getElementById('m-new').onclick = () => { if (confirm('Start a new blank drawing? Current work will be cleared (autosave keeps a copy).')) { graph.clear(); setFileName('Untitled'); resetHistory(); renderPageFrame(); scheduleRefresh(); } };
 document.getElementById('m-open').onclick = () => document.getElementById('fileinput').click();
 document.getElementById('m-save').onclick = saveFile;
-document.getElementById('m-ref').onclick = () => { if (confirm('Load the reference layout? This replaces the current drawing.')) { graph.clear(); buildLayout(); resetHistory(); renderPageFrame(); selectCell(null); fitContent(); scheduleRefresh(); } };
+document.getElementById('m-ref').onclick = () => { if (confirm('Load the reference layout? This replaces the current drawing.')) { graph.clear(); buildLayout(); setFileName('Untitled'); resetHistory(); renderPageFrame(); selectCell(null); fitContent(); scheduleRefresh(); } };
+document.getElementById('filename').onclick = () => {
+  const n = prompt('File name (used when saving):', currentFile === 'Untitled' ? (PROJECT.drawing || '') : currentFile);
+  if (n == null) return;
+  setFileName(n); markSaved('Renamed');
+};
 (function initTemplates() {
   const sel = document.getElementById('m-template');
   const tpls = window.PNID_TEMPLATES || {};
@@ -1697,7 +1724,7 @@ document.getElementById('m-ref').onclick = () => { if (confirm('Load the referen
     if (!name || !tpls[name]) return;
     if (!confirm('Load template "' + name + '"? This replaces the current drawing.')) return;
     applyDoc(JSON.parse(JSON.stringify(tpls[name])));
-    resetHistory(); autosave();
+    setFileName(name); resetHistory(); autosave();
   };
 })();
 document.getElementById('m-undo').onclick = undo;
@@ -1805,6 +1832,8 @@ function boot() {
     if (raw) { applyDoc(JSON.parse(raw)); restored = true; }
   } catch (e) {}
   if (!restored) { buildLayout(); renderPageFrame(); fitContent(); }
+  let savedName = null; try { savedName = localStorage.getItem(FILENAME_KEY); } catch (e) {}
+  setFileName(restored ? savedName : 'Untitled');
   resetHistory(); updateCounts(); updateZoomLabel();
   document.getElementById('savestate').textContent = restored ? 'Restored ✓' : 'Autosave on';
 }
