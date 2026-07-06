@@ -426,7 +426,26 @@ const paper = new dia.Paper({
   snapLinks: { radius: 12 },
   validateConnection: (cv, m, tv) => cv !== tv,
   markAvailable: true,
-  defaultConnectionPoint: { name: 'boundary', args: { selector: 'circle' } }, /* anchor on the visible dot, not the invisible grab circle */
+  /* land exactly on the visible port dot's edge — never on the invisible grab
+     circle or the label-inflated port bbox (both create floating endpoints) */
+  defaultConnectionPoint: function (line, view, magnet) {
+    try {
+      const portEl = magnet && (magnet.hasAttribute && magnet.hasAttribute('port') ? magnet : magnet.closest('[port]'));
+      if (portEl && view.findPortNode) {
+        const dot = view.findPortNode(portEl.getAttribute('port'), 'circle');
+        if (dot) {
+          const bb = view.getNodeBBox(dot);
+          const c = bb.center();
+          const r = Math.max(bb.width, bb.height) / 2;
+          const d = line.start.difference(c);
+          const len = Math.sqrt(d.x * d.x + d.y * d.y);
+          if (len > r) return c.clone().offset(d.x / len * r, d.y / len * r);
+          return c;
+        }
+      }
+    } catch (e) {}
+    return line.end;
+  },
   defaultRouter: { name: 'manhattan', args: { step: 10, padding: 16, isPointObstacle: () => false } },
   defaultConnector: { name: 'jumpover', args: { size: 6, type: 'arc' } }
 });
@@ -1012,7 +1031,62 @@ function endDirections(link, endKey) {
   if (el && end.port) { const f = portFace(el, end.port); if (f) return [f]; }
   return ['left', 'right', 'top', 'bottom'];
 }
+/* dumb router for hand-pinned paths: anchor -> vertices -> anchor with pure
+   right-angle elbows, never detouring around anything */
+function pinnedRouter(vertices, args, linkView) {
+  const src = linkView.sourceAnchor, tgt = linkView.targetAnchor;
+  const model = linkView.model;
+  const face = portFace(model.getSourceElement(), (model.get('source') || {}).port);
+  let horiz = face === 'left' || face === 'right';   // current travel axis
+  const out = [];
+  let prev = { x: src.x, y: src.y };
+  const stops = vertices.map(v => ({ x: v.x, y: v.y })).concat([{ x: tgt.x, y: tgt.y, end: true }]);
+  stops.forEach(function (v) {
+    const ax = Math.abs(prev.x - v.x), ay = Math.abs(prev.y - v.y);
+    if (ax > 1 && ay > 1) {
+      // not axis-aligned: insert one elbow, continuing the current travel axis first
+      out.push(horiz ? { x: v.x, y: prev.y } : { x: prev.x, y: v.y });
+      horiz = !horiz;
+    } else if (ax > 1 || ay > 1) {
+      horiz = ax > 1;
+    }
+    if (!v.end) out.push({ x: v.x, y: v.y });
+    prev = v;
+  });
+  return out;
+}
+function portAnchor(el, end) {
+  if (!el || !end || !end.port) return null;
+  const port = el.getPorts().find(p => p.id === end.port);
+  if (!port) return null;
+  const rel = el.getPortsPositions(port.group)[end.port];
+  if (!rel) return null;
+  const p = el.position();
+  return { x: p.x + rel.x, y: p.y + rel.y };
+}
 function applyLinkRouting(link) {
+  const vs = link.vertices();
+  if (vs && vs.length) {
+    /* the path was pinned by hand (template lanes / dragged vertices) — honor it
+       literally. Both manhattan and orthogonal detour around the link's own source
+       shape to reach a nearby vertex ("weird squares"), so use a dumb right-angle
+       router with zero element awareness. */
+    link.router(pinnedRouter);
+    link.connector('jumpover', { size: 6, type: 'arc' });
+    return;
+  }
+  const sa = portAnchor(link.getSourceElement(), link.get('source'));
+  const ta = portAnchor(link.getTargetElement(), link.get('target'));
+  if (sa && ta) {
+    const dx = Math.abs(sa.x - ta.x), dy = Math.abs(sa.y - ta.y);
+    /* ports facing each other closer than ~2x manhattan padding: a plain straight
+       segment — manhattan draws a self-crossing loop on hops this short. */
+    if ((dx <= 2 && dy <= 150) || (dy <= 2 && dx <= 150)) {
+      link.router('normal');
+      link.connector('jumpover', { size: 6, type: 'arc' });
+      return;
+    }
+  }
   const args = {
     step: 10, padding: 16,
     startDirections: endDirections(link, 'source'),
@@ -1027,6 +1101,11 @@ function applyLinkRouting(link) {
       }
       return false;
     };
+  } else {
+    // avoid other equipment, but never treat your own endpoints as obstacles —
+    // otherwise the router loops around its own source shape before reaching
+    // a nearby pinned vertex (the "weird square").
+    args.excludeEnds = ['source', 'target'];
   }
   link.router('manhattan', args);
   link.connector('jumpover', { size: 6, type: 'arc' });
@@ -1056,8 +1135,10 @@ function setLinkLabel(link) {
     const len = view ? view.getConnection().length() : 0;
     if (len > 220) pos = 70;
   } catch (e) {}
+  /* offset puts the label beside the pipe (above horizontals / left of verticals)
+     so its white backing never visually severs the line near a shape */
   link.labels([{ attrs: { text: { text: parts.join('\n'), fontSize: 9, fill: '#111', textAnchor: 'middle' },
-    rect: { fill: '#ffffff', stroke: 'none' } }, position: pos }]);
+    rect: { fill: '#ffffff', stroke: 'none' } }, position: { distance: pos, offset: -13 } }]);
 }
 function restyleAllLinks() { graph.getLinks().forEach(styleLink); }
 
