@@ -151,6 +151,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       </select>
       <label class="chk"><input type="checkbox" id="m-color" checked> Colour by service</label>
       <label class="chk"><input type="checkbox" id="m-route"> Route around equipment</label>
+      <label class="chk"><input type="checkbox" id="m-labels" checked> Labels</label>
     </div>
   </div>
 
@@ -403,6 +404,7 @@ let PROJECT = { name: '', client: '', drawing: 'PFD-001', rev: 'A', date: '', dr
 let viewMode = 'engineering';
 let colorByService = true;
 let routeAround = false;
+let showLabels = true;
 
 /* ============================================================
    Graph + Paper
@@ -1287,6 +1289,8 @@ function syncLabel(cell) {
   else if (t === 'note') cell.attr('label/text', m.text || '');
   else if (t === 'drainageHeader') cell.attr('label/text', [m.tag, m.name].filter(Boolean).join(' ') || 'Drainage Header');
   else cell.attr('label/text', [m.tag, m.name].filter(Boolean).join(' ') || (LABELS[t] || ''));
+  const alwaysShow = (t === 'note' || t === 'instrument');
+  cell.attr('label/display', (showLabels || alwaysShow) ? null : 'none');
 }
 
 /* ============================================================
@@ -1663,7 +1667,7 @@ function serialize() {
     angle: el.angle ? el.angle() : 0, meta: el.get('pnidMeta') }));
   graph.getLinks().forEach(l => cells.push({ k: 'l', id: l.id, source: l.get('source'), target: l.get('target'),
     vertices: l.vertices(), meta: l.get('pnidMeta') }));
-  return { v: 3, project: PROJECT, viewMode, colorByService, routeAround, cells };
+  return { v: 3, project: PROJECT, viewMode, colorByService, routeAround, showLabels, cells };
 }
 function toLeanCells(doc) {
   if (doc.cells) return doc.cells;
@@ -1701,9 +1705,11 @@ function applyDoc(doc) {
   viewMode = doc.viewMode || 'engineering';
   colorByService = doc.colorByService !== false;
   routeAround = !!doc.routeAround;
+  showLabels = doc.showLabels !== false;
   document.getElementById('m-mode').value = viewMode;
   document.getElementById('m-color').checked = colorByService;
   document.getElementById('m-route').checked = routeAround;
+  document.getElementById('m-labels').checked = showLabels;
   graph.clear();
   const idMap = {};
   toLeanCells(doc).filter(c => c.k === 'e').forEach(c => {
@@ -1749,19 +1755,23 @@ function saveViaDownload(askName) {
   markSaved('Saved to file');
 }
 async function saveAs() {
-  if (!FS_OK) { saveViaDownload(true); return; }
-  try {
-    const h = await window.showSaveFilePicker({
-      suggestedName: (currentFile === 'Untitled' ? (PROJECT.drawing || 'PFD-001') : currentFile) + '.json',
-      types: [{ description: 'PFD project (JSON)', accept: { 'application/json': ['.json'] } }]
-    });
-    await writeToHandle(h);
-    fileHandle = h;
-    setFileName(h.name);
-    markSaved('Saved to file');
-  } catch (e) {
-    if (e && e.name !== 'AbortError') alert('Save failed: ' + e.message);
+  if (FS_OK) {
+    try {
+      const h = await window.showSaveFilePicker({
+        suggestedName: (currentFile === 'Untitled' ? (PROJECT.drawing || 'PFD-001') : currentFile) + '.json',
+        types: [{ description: 'PFD project (JSON)', accept: { 'application/json': ['.json'] } }]
+      });
+      await writeToHandle(h);
+      fileHandle = h;
+      setFileName(h.name);
+      markSaved('Saved to file');
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;       // user cancelled the dialog
+      /* API present but blocked (e.g. file:// origin) -> fall back to a normal download */
+    }
   }
+  saveViaDownload(true);
 }
 async function saveFile() {
   if (FS_OK && fileHandle) {
@@ -1797,7 +1807,8 @@ async function openFile() {
     fileHandle = h;                       // Save now writes back to this file
     setFileName(f.name); resetHistory(); autosave();
   } catch (e) {
-    if (e && e.name !== 'AbortError') alert('Could not read project file: ' + e.message);
+    if (e && e.name === 'AbortError') return;         // user cancelled the picker
+    document.getElementById('fileinput').click();     // API blocked (file://) -> classic file input
   }
 }
 
@@ -1898,6 +1909,7 @@ document.getElementById('m-issues').onclick = () => openTab('issues');
 document.getElementById('m-mode').onchange = e => { viewMode = e.target.value; restyleAllLinks(); renderPageFrame(); };
 document.getElementById('m-color').onchange = e => { colorByService = e.target.checked; restyleAllLinks(); renderPageFrame(); };
 document.getElementById('m-route').onchange = e => { routeAround = e.target.checked; restyleAllLinks(); };
+document.getElementById('m-labels').onchange = e => { showLabels = e.target.checked; graph.getElements().forEach(syncLabel); };
 document.getElementById('m-title').onclick = openTitleModal;
 
 document.addEventListener('keydown', e => {
