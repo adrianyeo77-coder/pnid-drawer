@@ -152,6 +152,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <label class="chk"><input type="checkbox" id="m-color" checked> Colour by service</label>
       <label class="chk"><input type="checkbox" id="m-route"> Route around equipment</label>
       <label class="chk"><input type="checkbox" id="m-labels" checked> Labels</label>
+      <label class="chk"><input type="checkbox" id="m-linelabels" checked> Line labels</label>
     </div>
   </div>
 
@@ -405,6 +406,7 @@ let viewMode = 'engineering';
 let colorByService = true;
 let routeAround = false;
 let showLabels = true;
+let showLineLabels = true;
 
 /* ============================================================
    Graph + Paper
@@ -815,7 +817,7 @@ const SECTIONS = [
   { title: 'Tanks', items: [['tank', 'Tank'], ['sump', 'Open Tank'], ['chemTank', 'Chemical Tank']] },
   { title: 'Equipment', items: [
     ['pump', 'Pump'], ['dosingPump', 'Dosing Pump'], ['vessel', 'Filter'], ['cartridge', 'Cartridge Filter'],
-    ['membraneUF', 'UF Module'], ['membraneRO', 'RO Module'], ['compressor', 'Air Compressor'],
+    ['membraneUF', ''], ['membraneRO', 'RO Module'], ['compressor', 'Air Compressor'],
     ['blower', 'Blower'], ['drainageHeader', 'Drainage Header'] ] },
   { title: 'Valves & Instruments', items: [['valve', 'Control Valve'], ['manualValve', 'Manual Valve'], ['checkValve', 'Check Valve'], ['junction', 'Pipe Junction'], ['instrument', 'Instrument'], ['flowMeter', 'Flow Meter']] },
   { title: 'Off-page & Electrical', items: [['offpage', 'Destination'], ['panel', 'Control Panel']] },
@@ -1132,6 +1134,7 @@ function styleLink(link) {
 }
 function setLinkLabel(link) {
   const m = link.get('pnidMeta') || {};
+  if (!showLineLabels) { link.labels([]); return; }
   const parts = [];
   if (m.name) parts.push(m.name);
   if (viewMode === 'engineering' && m.lineNo) parts.push(m.lineNo);
@@ -1667,7 +1670,7 @@ function serialize() {
     angle: el.angle ? el.angle() : 0, meta: el.get('pnidMeta') }));
   graph.getLinks().forEach(l => cells.push({ k: 'l', id: l.id, source: l.get('source'), target: l.get('target'),
     vertices: l.vertices(), meta: l.get('pnidMeta') }));
-  return { v: 3, project: PROJECT, viewMode, colorByService, routeAround, showLabels, cells };
+  return { v: 3, project: PROJECT, viewMode, colorByService, routeAround, showLabels, showLineLabels, cells };
 }
 function toLeanCells(doc) {
   if (doc.cells) return doc.cells;
@@ -1706,10 +1709,12 @@ function applyDoc(doc) {
   colorByService = doc.colorByService !== false;
   routeAround = !!doc.routeAround;
   showLabels = doc.showLabels !== false;
+  showLineLabels = doc.showLineLabels !== false;
   document.getElementById('m-mode').value = viewMode;
   document.getElementById('m-color').checked = colorByService;
   document.getElementById('m-route').checked = routeAround;
   document.getElementById('m-labels').checked = showLabels;
+  document.getElementById('m-linelabels').checked = showLineLabels;
   graph.clear();
   const idMap = {};
   toLeanCells(doc).filter(c => c.k === 'e').forEach(c => {
@@ -1910,6 +1915,7 @@ document.getElementById('m-mode').onchange = e => { viewMode = e.target.value; r
 document.getElementById('m-color').onchange = e => { colorByService = e.target.checked; restyleAllLinks(); renderPageFrame(); };
 document.getElementById('m-route').onchange = e => { routeAround = e.target.checked; restyleAllLinks(); };
 document.getElementById('m-labels').onchange = e => { showLabels = e.target.checked; graph.getElements().forEach(syncLabel); };
+document.getElementById('m-linelabels').onchange = e => { showLineLabels = e.target.checked; restyleAllLinks(); };
 document.getElementById('m-title').onclick = openTitleModal;
 
 document.addEventListener('keydown', e => {
