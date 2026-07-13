@@ -1284,14 +1284,14 @@ function refreshProps() {
 
 function syncLabel(cell) {
   const m = cell.get('pnidMeta') || {}, t = cell.get('pnidType');
-  if (t === 'pump') cell.attr('label/text', [m.idTag, m.name].filter(Boolean).join(' / ') || 'Pump');
-  else if (t === 'tank' || t === 'chemTank') cell.attr('label/text', [ [m.tag, m.name].filter(Boolean).join(' '), m.size ].filter(Boolean).join('\n') || 'Tank');
+  if (t === 'pump') cell.attr('label/text', [m.idTag, m.name].filter(Boolean).join(' / '));
+  else if (t === 'tank' || t === 'chemTank') cell.attr('label/text', [ [m.tag, m.name].filter(Boolean).join(' '), m.size ].filter(Boolean).join('\n'));
   else if (t === 'instrument') cell.attr('label/text', m.tag || '');
   else if (t === 'flowMeter') cell.attr('label/text', m.name || '');
   else if (t === 'junction') cell.attr('label/text', m.tag || '');
   else if (t === 'note') cell.attr('label/text', m.text || '');
-  else if (t === 'drainageHeader') cell.attr('label/text', [m.tag, m.name].filter(Boolean).join(' ') || 'Drainage Header');
-  else cell.attr('label/text', [m.tag, m.name].filter(Boolean).join(' ') || (LABELS[t] || ''));
+  else if (t === 'drainageHeader') cell.attr('label/text', [m.tag, m.name].filter(Boolean).join(' '));
+  else cell.attr('label/text', [m.tag, m.name].filter(Boolean).join(' '));
   const alwaysShow = (t === 'note' || t === 'instrument');
   cell.attr('label/display', (showLabels || alwaysShow) ? null : 'none');
 }
