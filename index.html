@@ -544,7 +544,7 @@ function makeVessel() {
   return new Vessel({
     attrs: { label: { x: 32 } },
     ports: absPorts([
-      { id: 'in', x: '50%', y: 0 }, { id: 'out', x: '50%', y: '100%' },
+      { id: 'in', x: 0, y: '50%' }, { id: 'out', x: '100%', y: '50%' },
       { id: 'bl', x: '15%', y: '100%' }, { id: 'br', x: '85%', y: '100%' }
     ])
   });
